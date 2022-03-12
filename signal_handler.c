@@ -26,6 +26,7 @@
 #include "php_ini.h"
 #include "ext/standard/info.h"
 #include "php_signal_handler.h"
+#include "signal_handler_arginfo.h"
 
 #ifdef PHP_WIN32
 # include "win32/php_stdint.h"
@@ -35,32 +36,12 @@
 # include <stdint.h>
 #endif
 
-#if PHP_MAJOR_VERSION < 7
-#define _DECLARE_ZVAL(name) zval * name
-#define hp_ptr_dtor(val) zval_ptr_dtor(&val);
-#define zend_string_release(str) efree(str)
-#define ZSTR_VAL(str) (str)
-#else
 #include <zend_string.h>
 #define _DECLARE_ZVAL(name) zval name ## _v; zval * name = &name ## _v
 #define hp_ptr_dtor(val) zval_ptr_dtor(val);
-#endif
 
 ZEND_DECLARE_MODULE_GLOBALS(signal_handler);
-static  PHP_GINIT_FUNCTION(signal_handler);
-
-/* {{{ signal_handler_functions[]
- */
-const zend_function_entry signal_handler_functions[] = {
-	PHP_FE(attach_signal, NULL)
-	PHP_FE(detach_signal, NULL)
-	#if (PHP_MAJOR_VERSION == 5 && PHP_MINOR_VERSION == 3 && PHP_RELEASE_VERSION >= 7) || (PHP_MAJOR_VERSION == 5 && PHP_MINOR_VERSION >= 4) || (PHP_MAJOR_VERSION > 5)
-		PHP_FE_END
-	#else
-		{NULL,NULL,NULL}
-	#endif
-};
-/* }}} */
+static PHP_GINIT_FUNCTION(signal_handler);
 
 /* {{{ signal_handler_module_entry
  */
@@ -69,7 +50,7 @@ zend_module_entry signal_handler_module_entry = {
 		STANDARD_MODULE_HEADER,
 	#endif
 	"signal_handler",
-	signal_handler_functions,
+	ext_functions,
 	PHP_MINIT(signal_handler),
 	PHP_MSHUTDOWN(signal_handler),
 	PHP_RINIT(signal_handler),
@@ -145,21 +126,12 @@ PHP_MINFO_FUNCTION(signal_handler)
 
 void php_signal_callback_handler(int signo)
 {
-	TSRMLS_FETCH();
-
-	#if PHP_MAJOR_VERSION >= 7
 	zval *handle;
 	_DECLARE_ZVAL(retval);
 	_DECLARE_ZVAL(param);
 	handle = zend_hash_index_find(&SIGNAL_HANDLER_G(php_signal_table), signo);
 	if (!handle) {
-	#else
-	zval *param, **handle, *retval;
-	MAKE_STD_ZVAL(retval);
-	MAKE_STD_ZVAL(param);
-	if(zend_hash_index_find(&SIGNAL_HANDLER_G(php_signal_table), signo, (void **) &handle) == FAILURE){
-	#endif
-		php_error_docref(NULL TSRMLS_CC, E_ERROR, "Callback function not found for signo: %d", signo);
+		php_error_docref(NULL, E_ERROR, "Callback function not found for signo: %d", signo);
 		return;
 	}
 
@@ -167,47 +139,34 @@ void php_signal_callback_handler(int signo)
 	ZVAL_LONG(param, signo);
 
 	/* Call the function */
-	#if PHP_MAJOR_VERSION >= 7
-	call_user_function(EG(function_table), NULL, handle, retval, 1, param TSRMLS_CC);
-	#else
-	call_user_function(EG(function_table), NULL, *handle, retval, 1, &param TSRMLS_CC);
-	#endif
+	call_user_function(EG(function_table), NULL, handle, retval, 1, param);
 
 	hp_ptr_dtor(param);
 	hp_ptr_dtor(retval);
 }
 
-/* {{{ proto attach_signal(int signo, callback)
+/* {{{ bool attach_signal(int signo, callable callback)
 attach signal handler */
 PHP_FUNCTION(attach_signal)
 {
 	zval *handle, **dest_handle = NULL;
 
-	#if PHP_MAJOR_VERSION >= 7
 	zend_string *func_name;
-	#else
-	char *func_name;
-	#endif
 	long signo;
 
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "lz", &signo, &handle) == FAILURE) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "lz", &signo, &handle) == FAILURE) {
 		return;
 	}
 
 	/* Check signal code */
 	if (signo < 1 || signo > 32) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Invalid signal");
+		php_error_docref(NULL, E_WARNING, "Invalid signal");
 		RETURN_FALSE;
 	}
 
 	/* Check if given parameter is callable */
-	#if ZEND_MODULE_API_NO <= 20060613
 	if (!zend_is_callable(handle, 0, &func_name)) {
-	#else
-	if (!zend_is_callable(handle, 0, &func_name TSRMLS_CC)) {
-	#endif
-
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "%s is not a callable function name error", ZSTR_VAL(func_name));
+		php_error_docref(NULL, E_WARNING, "%s is not a callable function name error", ZSTR_VAL(func_name));
 		zend_string_release(func_name);
 		RETURN_FALSE;
 	}
@@ -216,36 +175,31 @@ PHP_FUNCTION(attach_signal)
 
 	/* Set the handler for the signal */
 	if (signal(signo, php_signal_callback_handler) == SIG_ERR) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "An error occurred while setting a signal handler for signo: %lu", signo);
+		php_error_docref(NULL, E_WARNING, "An error occurred while setting a signal handler for signo: %lu", signo);
 		RETURN_FALSE;
 	}
 
 	/* Add the function name to our signal table */
-	#if PHP_MAJOR_VERSION >= 7
 	zend_hash_index_update(&SIGNAL_HANDLER_G(php_signal_table), signo, handle);
 	zval_add_ref(handle);
-	#else
-	zend_hash_index_update(&SIGNAL_HANDLER_G(php_signal_table), signo, (void **) &handle, sizeof(zval *), (void **) &dest_handle);
- 	if (dest_handle) zval_add_ref(dest_handle);
- 	#endif
 
 	RETURN_TRUE;
 }
 /* }}} */
 
-/* {{{ proto detach_signal(int signo)
+/* {{{ bool detach_signal(int signo)
 detach signal handler */
 PHP_FUNCTION(detach_signal)
 {
 	long signo;
 
-	if (zend_parse_parameters(ZEND_NUM_ARGS() TSRMLS_CC, "l", &signo) == FAILURE) {
+	if (zend_parse_parameters(ZEND_NUM_ARGS(), "l", &signo) == FAILURE) {
 		return;
 	}
 
 	/* Check signal code */
 	if (signo < 1 || signo > 32) {
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Invalid signal");
+		php_error_docref(NULL, E_WARNING, "Invalid signal");
 		RETURN_FALSE;
 	}
 
@@ -254,7 +208,7 @@ PHP_FUNCTION(detach_signal)
 		zend_hash_index_del(&SIGNAL_HANDLER_G(php_signal_table), signo);
 		RETURN_TRUE;
 	}else{
-		php_error_docref(NULL TSRMLS_CC, E_WARNING, "Cannot detach signo: %lu", signo);
+		php_error_docref(NULL, E_WARNING, "Cannot detach signo: %lu", signo);
 		RETURN_FALSE;
 	}
 }

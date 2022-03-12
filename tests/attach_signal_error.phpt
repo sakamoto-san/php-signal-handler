@@ -14,13 +14,17 @@ function getInfo($noStatus){
 }
 
 $r = attach_signal(33, 'getInfo');
-echo $php_errormsg."\n";
+echo error_get_last()['message']."\n";
 
 $r = attach_signal(11, 'getNonExistingCallback');
-echo $php_errormsg."\n";
+echo error_get_last()['message']."\n";
 
-$r = attach_signal(11);
-echo $php_errormsg;
+try {
+    $r = attach_signal(11);
+} catch(\Throwable $e) {
+    echo $e->getMessage();
+}
+
 
 ?>
 --EXPECT--

@@ -17,10 +17,10 @@ $r = attach_signal(10, 'getInfo');
 var_dump($r);
 
 $r = detach_signal(44);
-echo $php_errormsg."\n";
+echo error_get_last()['message']."\n";
 
 $r = detach_signal(11);
-echo $php_errormsg;
+echo error_get_last()['message']."\n";
 
 ?>
 --EXPECT--

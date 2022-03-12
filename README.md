@@ -15,11 +15,8 @@ If a blocking method (such as ```AMQPQueue::consume()``` from [php-amqp](https:/
 ### Compatibility
 Extension will work only if C function ```signal``` is available (only on UNIX systems).<br/>
 PHP versions supported: <br/>
+* PHP 8
 * PHP 7
-* PHP 5.6
-* PHP 5.5
-* PHP 5.4
-* PHP 5.3
 
 ### Example
 ```php
